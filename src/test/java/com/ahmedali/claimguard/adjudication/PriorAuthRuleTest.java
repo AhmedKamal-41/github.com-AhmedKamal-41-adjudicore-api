@@ -70,4 +70,16 @@ class PriorAuthRuleTest {
     void orderIs20() {
         assertThat(rule.order()).isEqualTo(20);
     }
+
+    // --- Mutation-driven coverage of null branch ---
+
+    @Test
+    void nullProcedureCode_returnsEmpty_doesNotThrow() {
+        // Without the `cpt != null` short-circuit the rule would call
+        // PRIOR_AUTH_REQUIRED.contains(null) which throws NPE on the
+        // immutable Set.of(...) instance.
+        Optional<AdjudicationDecision> result = rule.evaluate(
+                claim(null), null, null, List.of());
+        assertThat(result).isEmpty();
+    }
 }

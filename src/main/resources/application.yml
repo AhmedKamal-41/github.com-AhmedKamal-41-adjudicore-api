@@ -30,3 +30,13 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  show-actuator: false
+  packages-to-scan: com.ahmedali.claimguard.api

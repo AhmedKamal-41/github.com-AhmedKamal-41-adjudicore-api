@@ -42,3 +42,6 @@ HELP.md
 
 # Local checkpoint notes — not pushed
 CHECKPOINT_*.md
+
+# Claude Code workspace state
+.claude/

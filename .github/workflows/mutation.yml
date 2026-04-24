@@ -1,0 +1,42 @@
+name: Mutation Testing
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'     # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pitest:
+    name: PIT
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Prime test classes (PIT needs compiled tests + jacoco.exec)
+        run: mvn --batch-mode --no-transfer-progress test
+
+      - name: Run PIT mutation coverage
+        run: mvn --batch-mode --no-transfer-progress pitest:mutationCoverage
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pit-report
+          path: target/pit-reports/
+          retention-days: 30

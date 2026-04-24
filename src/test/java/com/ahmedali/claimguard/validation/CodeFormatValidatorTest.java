@@ -75,4 +75,22 @@ class CodeFormatValidatorTest {
     void orderIs50() {
         assertThat(validator.order()).isEqualTo(50);
     }
+
+    // --- Mutation-driven coverage of null branches ---
+
+    @Test
+    void nullProcedureCode_returnsCarc181() {
+        ValidationResult result = validator.validate(claim(null, "J45.909"), null, null);
+
+        assertThat(result.isValid()).isFalse();
+        assertThat(result.rejectCodes()).containsExactly("CARC-181");
+    }
+
+    @Test
+    void nullDiagnosisCode_returnsCarc181() {
+        ValidationResult result = validator.validate(claim("99213", null), null, null);
+
+        assertThat(result.isValid()).isFalse();
+        assertThat(result.rejectCodes()).containsExactly("CARC-181");
+    }
 }

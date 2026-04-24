@@ -172,4 +172,58 @@ class CoverageLimitRuleTest {
     void orderIs30() {
         assertThat(rule.order()).isEqualTo(30);
     }
+
+    // --- Mutation-driven coverage of null branches ---
+
+    @Test
+    void nullMember_returnsEmpty() {
+        // Without the null-member short-circuit the rule would NPE on
+        // member.getPlanCode().
+        Claim current = claim("CLM-NEW", new BigDecimal("100.00"), null,
+                LocalDate.of(2025, 6, 15), ClaimStatus.VALIDATED);
+
+        Optional<AdjudicationDecision> result = rule.evaluate(current, null, null, List.of());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void priorApproved_withNullServiceDate_isIgnoredFromSum_notDenied() {
+        // Prior APPROVED with $49,999 allowed but NULL service date should not
+        // contribute to the year sum. Mutating the null-check would either NPE
+        // on getYear() or include the amount and trigger an unexpected deny.
+        Claim priorWithNullDate = Claim.builder()
+                .claimId("CLM-NULL-DATE").memberId("M001").providerNpi("1234567890")
+                .serviceDate(null)
+                .submissionDate(LocalDate.of(2025, 3, 2))
+                .procedureCode("99213").diagnosisCode("J45.909")
+                .billedAmount(new BigDecimal("49999.00"))
+                .allowedAmount(new BigDecimal("49999.00"))
+                .status(ClaimStatus.APPROVED)
+                .build();
+        Claim current = claim("CLM-NEW", new BigDecimal("100.00"), null,
+                LocalDate.of(2025, 6, 15), ClaimStatus.VALIDATED);
+
+        Optional<AdjudicationDecision> result = rule.evaluate(
+                current, member("HMO_SILVER"), null, List.of(priorWithNullDate));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void priorApproved_withNullAllowedAmount_isIgnoredFromSum_notDenied() {
+        // APPROVED prior with null allowedAmount is a corrupt-state edge case
+        // (shouldn't happen in prod but the rule must not NPE). The null-check
+        // guarding the .add() call is what keeps this safe.
+        LocalDate year = LocalDate.of(2025, 3, 1);
+        Claim priorNullAllowed = claim("CLM-NULL-ALLOW",
+                new BigDecimal("49999.00"), null, year, ClaimStatus.APPROVED);
+        Claim current = claim("CLM-NEW", new BigDecimal("100.00"), null,
+                LocalDate.of(2025, 6, 15), ClaimStatus.VALIDATED);
+
+        Optional<AdjudicationDecision> result = rule.evaluate(
+                current, member("HMO_SILVER"), null, List.of(priorNullAllowed));
+
+        assertThat(result).isEmpty();
+    }
 }

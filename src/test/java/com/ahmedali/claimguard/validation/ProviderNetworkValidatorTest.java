@@ -95,4 +95,23 @@ class ProviderNetworkValidatorTest {
     void orderIs20() {
         assertThat(validator.order()).isEqualTo(20);
     }
+
+    // --- Mutation-driven coverage of null branches ---
+
+    @Test
+    void outOfNetwork_nullMember_returnsValid_doesNotNpeOnPlanCode() {
+        // Guards the `member != null` short-circuit in the OON && chain:
+        // without it, enforcesStrictNetwork(null.getPlanCode()) would NPE.
+        ValidationResult result = validator.validate(baseClaim(), null, provider(false));
+        assertThat(result.isValid()).isTrue();
+    }
+
+    @Test
+    void outOfNetwork_memberWithNullPlanCode_returnsValid() {
+        // Guards the `planCode == null` early-return in enforcesStrictNetwork:
+        // without it, null.startsWith("HMO") would NPE.
+        ValidationResult result = validator.validate(
+                baseClaim(), member(null), provider(false));
+        assertThat(result.isValid()).isTrue();
+    }
 }

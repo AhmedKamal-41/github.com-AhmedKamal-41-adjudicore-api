@@ -102,4 +102,25 @@ class AmountValidatorTest {
     void orderIs40() {
         assertThat(validator.order()).isEqualTo(40);
     }
+
+    // --- Mutation-driven coverage of null branches ---
+
+    @Test
+    void nullAmount_returnsCarc45() {
+        ValidationResult result = validator.validate(
+                claimWithAmount(null), member("PPO_GOLD"), null);
+
+        assertThat(result.isValid()).isFalse();
+        assertThat(result.rejectCodes()).containsExactly("CARC-45");
+    }
+
+    @Test
+    void nullMember_skipsCapCheck_returnsValid_evenIfOverAnyCap() {
+        // With member null the plan-cap lookup is never reached, so a 60k
+        // amount that would trip the HMO/EPO cap passes through as valid.
+        ValidationResult result = validator.validate(
+                claimWithAmount(new BigDecimal("60000.00")), null, null);
+
+        assertThat(result.isValid()).isTrue();
+    }
 }

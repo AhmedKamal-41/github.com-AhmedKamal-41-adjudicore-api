@@ -83,4 +83,20 @@ class ServiceDateValidatorTest {
     void orderIs30() {
         assertThat(validator.order()).isEqualTo(30);
     }
+
+    // --- Mutation-driven coverage of null branches ---
+
+    @Test
+    void nullSubmissionDate_skipsFilingLimitCheck_returnsValid() {
+        // Without the `submissionDate != null` short-circuit,
+        // ChronoUnit.DAYS.between(serviceDate, null) would NPE.
+        // A 400-day-old service date with a null submission date must still
+        // pass (the filing window only matters once submission is recorded).
+        LocalDate today = LocalDate.now();
+        Claim c = claim(today.minusDays(400), null);
+
+        ValidationResult result = validator.validate(c, null, null);
+
+        assertThat(result.isValid()).isTrue();
+    }
 }
