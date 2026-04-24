@@ -162,13 +162,13 @@ jobs:
           restore-keys: ${{ runner.os }}-m2-
 
       - name: Download unit exec
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: jacoco-unit-exec
           path: target/
 
       - name: Download integration exec
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: jacoco-integration-exec
           path: target/
