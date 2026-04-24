@@ -1,0 +1,559 @@
+{
+  "info": {
+    "_postman_id": "a6d2c3d4-0000-4000-8000-adjudicore01",
+    "name": "AdjudiCore API",
+    "description": "Interactive collection for the AdjudiCore claims API.\n\nExercises every lifecycle outcome:\n  - Clean submit → validate → adjudicate (APPROVE)\n  - Submit + validate with expired member (REJECTED)\n  - Prior-auth CPT (PEND)\n  - Duplicate claim (DENY)\n  - Error envelopes (400, 404, 409)\n\nSet `baseUrl` to point at your running API. The `claimId` collection variable is populated automatically by the first Intake request. Run requests top-to-bottom, or run the '05 — Full Lifecycle' folder for the scripted end-to-end flow.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "claimId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "priorAuthClaimId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "expiredClaimId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "duplicateClaimId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 — Intake",
+      "item": [
+        {
+          "name": "Submit valid claim",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const today = new Date().toISOString().split('T')[0];",
+                  "pm.variables.set('todayIso', today);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('claimId matches CLM-YYYYMMDD-XXXXXX', () => {",
+                  "    pm.expect(body.claimId).to.match(/^CLM-\\d{8}-[A-Z0-9]{6}$/);",
+                  "});",
+                  "pm.test('status is SUBMITTED', () => pm.expect(body.status).to.eql('SUBMITTED'));",
+                  "pm.collectionVariables.set('claimId', body.claimId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"M001\",\n  \"providerNpi\": \"1234567890\",\n  \"serviceDate\": \"{{todayIso}}\",\n  \"procedureCode\": \"99213\",\n  \"diagnosisCode\": \"J45.909\",\n  \"billedAmount\": 150.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims"]
+            },
+            "description": "Submits an in-network clean claim. Expected: 201, status SUBMITTED, body.claimId matches `CLM-YYYYMMDD-XXXXXX`. Sets the `claimId` collection variable for downstream requests."
+          }
+        },
+        {
+          "name": "Submit invalid claim (missing memberId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const body = pm.response.json();",
+                  "pm.test('error envelope shape', () => {",
+                  "    pm.expect(body).to.have.all.keys('timestamp', 'status', 'error', 'message', 'fieldErrors');",
+                  "    pm.expect(body.status).to.eql(400);",
+                  "    pm.expect(body.error).to.eql('Bad Request');",
+                  "    pm.expect(body.message).to.eql('Validation failed');",
+                  "});",
+                  "pm.test('memberId field error present', () => {",
+                  "    pm.expect(body.fieldErrors).to.have.property('memberId');",
+                  "    pm.expect(body.fieldErrors.memberId).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"providerNpi\": \"1234567890\",\n  \"serviceDate\": \"2026-04-20\",\n  \"procedureCode\": \"99213\",\n  \"diagnosisCode\": \"J45.909\",\n  \"billedAmount\": 150.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims"]
+            },
+            "description": "Payload is missing `memberId`. Expected: 400 with the standard 5-key error envelope and `fieldErrors.memberId` populated."
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 — Retrieve",
+      "item": [
+        {
+          "name": "Get claim by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const expected = pm.collectionVariables.get('claimId');",
+                  "pm.test('body.claimId matches URL', () => pm.expect(body.claimId).to.eql(expected));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims/{{claimId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims", "{{claimId}}"]
+            },
+            "description": "Fetches the claim created by the first Intake request. Expected: 200, body.claimId equals the variable."
+          }
+        },
+        {
+          "name": "Get unknown claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.response.to.have.status(404));",
+                  "const body = pm.response.json();",
+                  "pm.test('error envelope has 4 keys, no fieldErrors', () => {",
+                  "    pm.expect(body).to.have.all.keys('timestamp', 'status', 'error', 'message');",
+                  "});",
+                  "pm.test('message mentions not found', () => {",
+                  "    pm.expect(body.message).to.include('not found');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims/CLM-99999999-ZZZZZZ",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims", "CLM-99999999-ZZZZZZ"]
+            },
+            "description": "Exercises the 404 path. Expected: 404 with the 4-key error envelope (no `fieldErrors`)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 — Validation",
+      "item": [
+        {
+          "name": "Validate happy path",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('status transitioned to VALIDATED', () => pm.expect(body.status).to.eql('VALIDATED'));",
+                  "pm.test('no reasonCodes on happy path', () => {",
+                  "    pm.expect(body.reasonCodes === undefined || body.reasonCodes.length === 0).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims/{{claimId}}/validate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims", "{{claimId}}", "validate"]
+            },
+            "description": "Runs the validation pipeline on the claim from Intake. Expected: 200, status VALIDATED, no reason codes."
+          }
+        },
+        {
+          "name": "Validate expired member (M005)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const today = new Date().toISOString().split('T')[0];",
+                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
+                  "pm.sendRequest({",
+                  "    url: baseUrl + '/api/v1/claims',",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: {",
+                  "        mode: 'raw',",
+                  "        raw: JSON.stringify({",
+                  "            memberId: 'M005',",
+                  "            providerNpi: '1234567890',",
+                  "            serviceDate: today,",
+                  "            procedureCode: '99213',",
+                  "            diagnosisCode: 'J45.909',",
+                  "            billedAmount: 150.00",
+                  "        })",
+                  "    }",
+                  "}, (err, res) => {",
+                  "    if (err) { console.error(err); return; }",
+                  "    pm.collectionVariables.set('expiredClaimId', res.json().claimId);",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('claim rejected', () => pm.expect(body.status).to.eql('REJECTED'));",
+                  "pm.test('reasonCodes includes CARC-27', () => {",
+                  "    pm.expect(body.reasonCodes).to.be.an('array');",
+                  "    pm.expect(body.reasonCodes).to.include('CARC-27');",
+                  "});",
+                  "pm.test('message is readable, not just a code', () => {",
+                  "    pm.expect(body.message).to.include('Expenses incurred after coverage terminated');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims/{{expiredClaimId}}/validate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims", "{{expiredClaimId}}", "validate"]
+            },
+            "description": "Pre-request creates an M005 claim (expired member). Validating it should return REJECTED with CARC-27 and a human-readable message."
+          }
+        },
+        {
+          "name": "Validate already-validated claim",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 409', () => pm.response.to.have.status(409));",
+                  "const body = pm.response.json();",
+                  "pm.test('message mentions VALIDATED', () => pm.expect(body.message).to.include('VALIDATED'));",
+                  "pm.test('message mentions SUBMITTED', () => pm.expect(body.message).to.include('SUBMITTED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims/{{claimId}}/validate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims", "{{claimId}}", "validate"]
+            },
+            "description": "Calls validate on a claim that is already VALIDATED. Expected: 409 Conflict with the error envelope mentioning both the current and expected states."
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 — Adjudication",
+      "item": [
+        {
+          "name": "Adjudicate clean approve",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('claim approved', () => pm.expect(body.status).to.eql('APPROVED'));",
+                  "pm.test('allowedAmount is 125.00 (CPT 99213 fee schedule)', () => {",
+                  "    pm.expect(Number(body.allowedAmount)).to.eql(125);",
+                  "});",
+                  "pm.test('message is APPROVED notes', () => {",
+                  "    pm.expect(body.message).to.eql('Approved at fee schedule rate');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims/{{claimId}}/adjudicate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims", "{{claimId}}", "adjudicate"]
+            },
+            "description": "Runs the adjudication engine on the VALIDATED claim. Expected: 200, status APPROVED, allowedAmount 125.00 (CPT 99213 fee schedule)."
+          }
+        },
+        {
+          "name": "Adjudicate prior-auth (70553)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const today = new Date().toISOString().split('T')[0];",
+                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
+                  "pm.sendRequest({",
+                  "    url: baseUrl + '/api/v1/claims',",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: {",
+                  "        mode: 'raw',",
+                  "        raw: JSON.stringify({",
+                  "            memberId: 'M002',",
+                  "            providerNpi: '2345678901',",
+                  "            serviceDate: today,",
+                  "            procedureCode: '70553',",
+                  "            diagnosisCode: 'J45.909',",
+                  "            billedAmount: 2500.00",
+                  "        })",
+                  "    }",
+                  "}, (err, res) => {",
+                  "    if (err) { console.error(err); return; }",
+                  "    const id = res.json().claimId;",
+                  "    pm.collectionVariables.set('priorAuthClaimId', id);",
+                  "    pm.sendRequest({",
+                  "        url: baseUrl + '/api/v1/claims/' + id + '/validate',",
+                  "        method: 'POST'",
+                  "    }, () => {});",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('status stays VALIDATED on PEND', () => pm.expect(body.status).to.eql('VALIDATED'));",
+                  "pm.test('reasonCodes is [CARC-197]', () => {",
+                  "    pm.expect(body.reasonCodes).to.eql(['CARC-197']);",
+                  "});",
+                  "pm.test('message mentions prior authorization', () => {",
+                  "    pm.expect(body.message).to.include('requires prior authorization');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims/{{priorAuthClaimId}}/adjudicate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims", "{{priorAuthClaimId}}", "adjudicate"]
+            },
+            "description": "Pre-request submits + validates a claim with CPT 70553 (MRI Brain — prior-auth CPT). Adjudicating it should PEND, keeping status at VALIDATED with CARC-197 in the audit and response."
+          }
+        },
+        {
+          "name": "Adjudicate duplicate",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const today = new Date().toISOString().split('T')[0];",
+                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
+                  "const payload = JSON.stringify({",
+                  "    memberId: 'M001',",
+                  "    providerNpi: '1234567890',",
+                  "    serviceDate: today,",
+                  "    procedureCode: '99213',",
+                  "    diagnosisCode: 'J45.909',",
+                  "    billedAmount: 150.00",
+                  "});",
+                  "pm.sendRequest({",
+                  "    url: baseUrl + '/api/v1/claims',",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: { mode: 'raw', raw: payload }",
+                  "}, (err, res) => {",
+                  "    if (err) { console.error(err); return; }",
+                  "    const id = res.json().claimId;",
+                  "    pm.collectionVariables.set('duplicateClaimId', id);",
+                  "    pm.sendRequest({",
+                  "        url: baseUrl + '/api/v1/claims/' + id + '/validate',",
+                  "        method: 'POST'",
+                  "    }, () => {});",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('claim denied as duplicate', () => pm.expect(body.status).to.eql('DENIED'));",
+                  "pm.test('reasonCodes is [CARC-18]', () => pm.expect(body.reasonCodes).to.eql(['CARC-18']));",
+                  "pm.test('message starts with Duplicate of claim CLM-', () => {",
+                  "    pm.expect(body.message).to.match(/^Duplicate of claim CLM-/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims/{{duplicateClaimId}}/adjudicate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims", "{{duplicateClaimId}}", "adjudicate"]
+            },
+            "description": "Pre-request submits + validates an identical claim to the one approved earlier. Adjudicating it should DENY with CARC-18 (duplicate)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 — Full Lifecycle",
+      "item": [
+        {
+          "name": "Full approve pipeline",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// This request's own response is the SUBMIT (201). The test",
+                  "// script chains validate + adjudicate via pm.sendRequest and",
+                  "// asserts final status.",
+                  "pm.test('submit returned 201', () => pm.response.to.have.status(201));",
+                  "const submit = pm.response.json();",
+                  "pm.expect(submit.claimId).to.match(/^CLM-\\d{8}-[A-Z0-9]{6}$/);",
+                  "",
+                  "const baseUrl = pm.collectionVariables.get('baseUrl');",
+                  "const id = submit.claimId;",
+                  "",
+                  "pm.sendRequest({",
+                  "    url: baseUrl + '/api/v1/claims/' + id + '/validate',",
+                  "    method: 'POST'",
+                  "}, (err, validateRes) => {",
+                  "    pm.test('validate returned 200', () => pm.expect(validateRes.code).to.eql(200));",
+                  "    pm.test('validate status VALIDATED', () => {",
+                  "        pm.expect(validateRes.json().status).to.eql('VALIDATED');",
+                  "    });",
+                  "",
+                  "    pm.sendRequest({",
+                  "        url: baseUrl + '/api/v1/claims/' + id + '/adjudicate',",
+                  "        method: 'POST'",
+                  "    }, (err2, adjRes) => {",
+                  "        pm.test('adjudicate returned 200', () => pm.expect(adjRes.code).to.eql(200));",
+                  "        pm.test('adjudicate status APPROVED', () => {",
+                  "            pm.expect(adjRes.json().status).to.eql('APPROVED');",
+                  "        });",
+                  "        pm.test('allowedAmount > 0', () => {",
+                  "            pm.expect(Number(adjRes.json().allowedAmount)).to.be.greaterThan(0);",
+                  "        });",
+                  "    });",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const today = new Date().toISOString().split('T')[0];",
+                  "pm.variables.set('todayIso', today);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"M003\",\n  \"providerNpi\": \"3456789012\",\n  \"serviceDate\": \"{{todayIso}}\",\n  \"procedureCode\": \"99214\",\n  \"diagnosisCode\": \"E11.9\",\n  \"billedAmount\": 200.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/claims",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "claims"]
+            },
+            "description": "End-to-end scripted flow. The request submits a claim; the test script chains validate + adjudicate via `pm.sendRequest` and asserts each step. Expected terminal: APPROVED with allowedAmount > 0."
+          }
+        }
+      ]
+    }
+  ]
+}
