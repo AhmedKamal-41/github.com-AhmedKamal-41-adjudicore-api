@@ -1,0 +1,235 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ============================================================
+  # JOB 1: Build + compile
+  # Fast feedback: does the code compile?
+  # ============================================================
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Compile
+        run: mvn --batch-mode --no-transfer-progress clean compile
+
+  # ============================================================
+  # JOB 2: Unit tests (Surefire only, no Docker, no DB)
+  # ============================================================
+  unit-tests:
+    name: Unit Tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Run unit tests (Surefire)
+        run: mvn --batch-mode --no-transfer-progress test
+
+      - name: Upload Surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 14
+
+      - name: Upload unit test JaCoCo exec
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-unit-exec
+          path: target/jacoco.exec
+          retention-days: 7
+
+  # ============================================================
+  # JOB 3: Integration + contract tests (Testcontainers)
+  # Runs in parallel with unit-tests
+  # ============================================================
+  integration-tests:
+    name: Integration & Contract Tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Pre-pull Postgres image (parallel with next steps)
+        run: docker pull postgres:16.13 &
+
+      - name: Run integration + contract tests (Failsafe only)
+        run: mvn --batch-mode --no-transfer-progress verify -DskipUnitTests=true
+        env:
+          TESTCONTAINERS_REUSE_ENABLE: "true"
+
+      - name: Upload Failsafe reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failsafe-reports
+          path: target/failsafe-reports/
+          retention-days: 14
+
+      - name: Upload integration JaCoCo exec
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-integration-exec
+          path: target/jacoco-it.exec
+          retention-days: 7
+
+  # ============================================================
+  # JOB 4: Coverage merge + 85% gate
+  # ============================================================
+  coverage-gate:
+    name: Coverage Gate
+    needs: [unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Download unit exec
+        uses: actions/download-artifact@v4
+        with:
+          name: jacoco-unit-exec
+          path: target/
+
+      - name: Download integration exec
+        uses: actions/download-artifact@v4
+        with:
+          name: jacoco-integration-exec
+          path: target/
+
+      - name: Merge, report, and enforce 85% line coverage
+        run: |
+          mvn --batch-mode --no-transfer-progress \
+            jacoco:merge@merge-exec \
+            jacoco:report@report-merged \
+            jacoco:check@check-coverage
+
+      - name: Upload merged HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-html-report
+          path: target/site/jacoco-merged/
+          retention-days: 30
+
+      - name: Comment coverage summary on PR
+        if: github.event_name == 'pull_request'
+        uses: madrapps/jacoco-report@v1.7.1
+        with:
+          paths: target/site/jacoco-merged/jacoco.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          min-coverage-overall: 85
+          min-coverage-changed-files: 80
+          title: Coverage report
+          update-comment: true
+
+  # ============================================================
+  # JOB 5: Package (main branch only)
+  # ============================================================
+  package:
+    name: Package
+    needs: coverage-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: Build executable jar
+        run: mvn --batch-mode --no-transfer-progress package -DskipTests
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: adjudicore-${{ github.sha }}
+          path: target/claimguard-*.jar
+          retention-days: 90
