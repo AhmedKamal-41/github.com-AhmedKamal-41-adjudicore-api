@@ -190,7 +190,7 @@ jobs:
 
       - name: Comment coverage summary on PR
         if: github.event_name == 'pull_request'
-        uses: madrapps/jacoco-report@v1.7.1
+        uses: madrapps/jacoco-report@v1.7.2
         with:
           paths: target/site/jacoco-merged/jacoco.xml
           token: ${{ secrets.GITHUB_TOKEN }}
