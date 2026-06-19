@@ -22,7 +22,7 @@
         <lombok.version>1.18.38</lombok.version>
         <testcontainers.version>1.21.3</testcontainers.version>
         <rest-assured.version>5.5.0</rest-assured.version>
-        <jacoco.version>0.8.13</jacoco.version>
+        <jacoco.version>0.8.14</jacoco.version>
         <!--
             Default for CI control flag. `-DskipUnitTests=true` on the command
             line overrides this and makes `mvn verify` skip surefire but still
